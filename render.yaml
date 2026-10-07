@@ -1,15 +1,14 @@
 services:
   - type: web
     name: musicsync
-    runtime: docker
+    runtime: node
     plan: free
     region: oregon
     branch: main
-    dockerfilePath: ./Dockerfile
+    buildCommand: npm install
+    startCommand: npm start
     envVars:
-      - key: JAVA_OPTS
-        value: "-Xmx512m"
-      - key: SERVER_PORT
+      - key: PORT
         value: "8080"
       - key: YOUTUBE_API_KEY
         sync: false

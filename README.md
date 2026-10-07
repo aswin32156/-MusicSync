@@ -15,8 +15,8 @@ A real-time synchronized music listening platform where friends can create rooms
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Java 21
-- Maven 3.9+
+- Node.js 18+
+- npm
 
 ### Run Locally
 
@@ -25,8 +25,11 @@ A real-time synchronized music listening platform where friends can create rooms
 git clone https://github.com/aswin32156/Sync_Music.git
 cd Sync_Music
 
+# Install dependencies
+npm install
+
 # Run the application
-./mvnw spring-boot:run
+npm start
 
 # Access at http://localhost:8080
 ```
@@ -82,10 +85,10 @@ cd Sync_Music
 
 ## 🛠️ Tech Stack
 
-- **Backend:** Spring Boot 3.2.3, Java 21
-- **WebSocket:** STOMP over SockJS
-- **APIs:** Official JioSaavn partner API support when credentials are available, YouTube Data API v3 (optional)
-- **Frontend:** Vanilla JavaScript, HTML5 Audio API
+- **Backend:** Node.js, Express
+- **WebSocket:** Socket.io
+- **APIs:** JioSaavn (with DES decrypt), YouTube Data API v3 (optional fallback web scraping)
+- **Frontend:** Vanilla JavaScript, HTML5 Audio API, CSS3
 - **Deployment:** Docker, Render.com
 
 ## 📝 API Endpoints
