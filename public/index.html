@@ -348,20 +348,23 @@
                                     <button class="btn-control" onclick="previousSong()" title="Previous">
                                         <i class="fas fa-step-backward"></i>
                                     </button>
-                                    <button class="btn-control btn-play" id="btn-play-pause" onclick="togglePlayPause()">
+                                    <button class="btn-control btn-play" id="btn-play-pause"
+                                        onclick="togglePlayPause()">
                                         <i class="fas fa-play" id="play-pause-icon"></i>
                                     </button>
                                     <button class="btn-control" onclick="nextSong()" title="Next">
                                         <i class="fas fa-step-forward"></i>
                                     </button>
-                                    <button class="btn-control" onclick="addCurrentSongToPlaylist()" title="Save current song to playlist">
+                                    <button class="btn-control" onclick="addCurrentSongToPlaylist()"
+                                        title="Save current song to playlist">
                                         <i class="fas fa-folder-plus"></i>
                                     </button>
                                 </div>
 
                                 <div class="host-indicator" id="host-indicator">
                                     <i class="fas fa-crown"></i>
-                                    <span>Listeners can play, pause, add, move, and skip songs. Only host can remove or seek.</span>
+                                    <span>Listeners can play, pause, add, move, and skip songs. Only host can remove or
+                                        seek.</span>
                                 </div>
                             </div>
                         </div>
@@ -371,7 +374,8 @@
                     <div class="queue-section-header">
                         <h3><i class="fas fa-list"></i> Room Queue</h3>
                         <div class="queue-toolbar" id="queue-toolbar">
-                            <button class="btn btn-secondary btn-sm" onclick="saveQueueAsPlaylist()" id="btn-save-queue-playlist" title="Save this queue as a new playlist">
+                            <button class="btn btn-secondary btn-sm" onclick="saveQueueAsPlaylist()"
+                                id="btn-save-queue-playlist" title="Save this queue as a new playlist">
                                 <i class="fas fa-bookmark"></i> Save Queue as Playlist
                             </button>
                         </div>
@@ -447,13 +451,15 @@
                     <div class="playlists-main-header">
                         <div>
                             <h3><i class="fas fa-layer-group"></i> My Playlists</h3>
-                            <p class="section-subtitle">Create playlists, add your favorite songs, and play them in the room</p>
+                            <p class="section-subtitle">Create playlists, add your favorite songs, and play them in the
+                                room</p>
                         </div>
                         <div class="header-actions-group">
                             <button class="btn btn-primary" onclick="openCreatePlaylistModal()">
                                 <i class="fas fa-plus-circle"></i> Create Playlist
                             </button>
-                            <button class="btn btn-secondary" onclick="saveQueueAsPlaylist()" title="Save active room queue as a new playlist">
+                            <button class="btn btn-secondary" onclick="saveQueueAsPlaylist()"
+                                title="Save active room queue as a new playlist">
                                 <i class="fas fa-bookmark"></i> Save Current Queue
                             </button>
                         </div>
@@ -488,7 +494,7 @@
                     <i class="fas fa-times"></i>
                 </button>
             </div>
-            
+
             <div class="modal-song-preview" id="modal-song-preview">
                 <img id="modal-song-thumb" src="" alt="Song Cover" class="modal-song-thumb">
                 <div class="modal-song-info">
@@ -500,7 +506,7 @@
             <!-- Quick create new playlist -->
             <div class="quick-create-section">
                 <input type="text" id="quick-playlist-name" placeholder="Create new playlist name..." maxlength="40"
-                       onkeydown="if(event.key==='Enter') createPlaylistAndAddSong()">
+                    onkeydown="if(event.key==='Enter') createPlaylistAndAddSong()">
                 <button class="btn btn-primary btn-sm" onclick="createPlaylistAndAddSong()">
                     <i class="fas fa-plus"></i> Create & Add
                 </button>
@@ -528,11 +534,13 @@
             <div class="modal-body-form">
                 <div class="input-group">
                     <label>Playlist Name</label>
-                    <input type="text" id="new-playlist-title" placeholder="e.g. Tamil Vibe Melodies, Workout Beats" maxlength="40">
+                    <input type="text" id="new-playlist-title" placeholder="e.g. Tamil Vibe Melodies, Workout Beats"
+                        maxlength="40">
                 </div>
                 <div class="input-group">
                     <label>Description <span class="optional">(optional)</span></label>
-                    <input type="text" id="new-playlist-desc" placeholder="e.g. My favorite chill tracks for night listening" maxlength="100">
+                    <input type="text" id="new-playlist-desc"
+                        placeholder="e.g. My favorite chill tracks for night listening" maxlength="100">
                 </div>
                 <div class="modal-actions-right">
                     <button class="btn btn-secondary" onclick="closeCreatePlaylistModal()">Cancel</button>
