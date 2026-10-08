@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b132b"/>
+      <stop offset="50%" stop-color="#1c2541"/>
+      <stop offset="100%" stop-color="#0b132b"/>
+    </linearGradient>
+
+    <!-- Vibrant Emerald to Cyan Neon Gradient -->
+    <linearGradient id="brandNeon" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="45%" stop-color="#1ed760"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+
+    <!-- Ring Pulse Gradient -->
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1ed760" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#06b6d4" stop-opacity="0.2"/>
+    </linearGradient>
+
+    <!-- Glowing Drop Shadow Filter -->
+    <filter id="neonGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Squircle Base with Neon Edge -->
+  <rect x="4" y="4" width="92" height="92" rx="26" fill="url(#bgGrad)" stroke="url(#brandNeon)" stroke-width="2.5" />
+
+  <!-- Outer Sound Pulse Wave Left -->
+  <path d="M 23 34 A 24 24 0 0 0 23 66" fill="none" stroke="url(#ringGrad)" stroke-width="3" stroke-linecap="round" />
+  <path d="M 16 26 A 34 34 0 0 0 16 74" fill="none" stroke="url(#ringGrad)" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.4" />
+
+  <!-- Outer Sound Pulse Wave Right -->
+  <path d="M 77 34 A 24 24 0 0 1 77 66" fill="none" stroke="url(#ringGrad)" stroke-width="3" stroke-linecap="round" />
+  <path d="M 84 26 A 34 34 0 0 1 84 74" fill="none" stroke="url(#ringGrad)" stroke-width="2.5" stroke-linecap="round" stroke-opacity="0.4" />
+
+  <!-- Central Synchronized Double Musical Note with Equalizer Bridge -->
+  <g filter="url(#neonGlow)">
+    <!-- Connecting Wave Beam -->
+    <path d="M 41 33 C 48 30, 56 32, 63 29 L 63 36 C 56 39, 48 37, 41 40 Z" fill="url(#brandNeon)"/>
+
+    <!-- Left Stem -->
+    <rect x="38" y="34" width="4.5" height="30" rx="2" fill="url(#brandNeon)"/>
+
+    <!-- Left Note Head (Angled) -->
+    <ellipse cx="34" cy="63" rx="8" ry="6" transform="rotate(-25 34 63)" fill="url(#brandNeon)"/>
+
+    <!-- Right Stem -->
+    <rect x="60" y="30" width="4.5" height="28" rx="2" fill="url(#brandNeon)"/>
+
+    <!-- Right Note Head (Angled) -->
+    <ellipse cx="56" cy="57" rx="8" ry="6" transform="rotate(-25 56 57)" fill="url(#brandNeon)"/>
+
+    <!-- Center Sync Equalizer Wave Lines -->
+    <line x1="47" y1="44" x2="47" y2="58" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="52" y1="41" x2="52" y2="55" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+
+  <!-- Center Sync Sparkle / Pulse Center Dot -->
+  <circle cx="50" cy="50" r="1.5" fill="#ffffff" opacity="0.9"/>
+</svg>
