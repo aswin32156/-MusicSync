@@ -24,6 +24,14 @@ const PORT = process.env.PORT || 8080;
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
+
+// Explicit favicon routes with no-cache header to force immediate browser tab update
+app.get(['/favicon.ico', '/favicon.png'], (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Content-Type', 'image/png');
+    res.sendFile(path.join(__dirname, 'public', 'images', 'logo.png'));
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ==========================================
