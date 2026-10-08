@@ -346,6 +346,27 @@ body {
     font-weight: 700;
 }
 
+.brand-logo-img {
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    object-fit: cover;
+    box-shadow: 0 0 12px rgba(30, 215, 96, 0.35);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.nav-logo:hover .brand-logo-img {
+    transform: scale(1.08) rotate(-3deg);
+}
+
+.splash-logo-img {
+    width: 80px;
+    height: 80px;
+    border-radius: 20px;
+    object-fit: cover;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
 .nav-logo i {
     color: var(--accent);
     font-size: 24px;
