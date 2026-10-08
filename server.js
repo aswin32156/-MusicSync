@@ -616,6 +616,10 @@ io.on('connection', (socket) => {
 });
 
 // Start Server
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`🎵 MusicSync Node.js Server running at http://localhost:${PORT}`);
-});
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+    server.listen(PORT, '0.0.0.0', () => {
+        console.log(`🎵 MusicSync Node.js Server running at http://localhost:${PORT}`);
+    });
+}
+
+module.exports = app;
