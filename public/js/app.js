@@ -2484,12 +2484,23 @@ function connectWebSocket(roomCode, username) {
     statusEl.innerHTML = '<i class="fas fa-wifi"></i><span>Connecting' + (connectionRetries > 1 ? ' (attempt ' + connectionRetries + ')' : '') + '...</span>';
 
     try {
+        if (typeof io === 'undefined') {
+            console.error('[WebSocket] Socket.IO client library (io) is not loaded.');
+            isConnecting = false;
+            statusEl.className = 'connection-status show disconnected';
+            statusEl.innerHTML = '<i class="fas fa-wifi"></i><span>Connection error</span>';
+            showToast('Real-time sync library (Socket.io) failed to load. Please check network or ad-blocker.', 'error');
+            return;
+        }
+
         if (!socket) {
-            socket = io({
+            const socketOpts = {
                 reconnection: true,
                 reconnectionAttempts: 10,
                 reconnectionDelay: 1000
-            });
+            };
+            const customBackend = window.BACKEND_URL || localStorage.getItem('musicsync_backend_url') || '';
+            socket = customBackend ? io(customBackend, socketOpts) : io(socketOpts);
 
             socket.on('connect', () => {
                 console.log('[WebSocket] Connected successfully via Socket.io!', socket.id);
@@ -2539,6 +2550,9 @@ function connectWebSocket(roomCode, username) {
                 isConnecting = false;
                 statusEl.className = 'connection-status show disconnected';
                 statusEl.innerHTML = '<i class="fas fa-wifi"></i><span>Connection failed</span>';
+                if (window.location.hostname.endsWith('vercel.app')) {
+                    console.warn('[WebSocket] Notice: Vercel serverless functions do not support WebSockets. For live syncing, deploy backend to Render or a VPS.');
+                }
             });
         } else if (!socket.connected) {
             socket.connect();

@@ -32,6 +32,12 @@ app.get(['/favicon.ico', '/favicon.png'], (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'images', 'logo.png'));
 });
 
+// Explicit Socket.IO client route to guarantee availability in all environments
+app.get(['/socket.io/socket.io.js', '/socket.io/socket.io.min.js'], (req, res) => {
+    res.setHeader('Content-Type', 'application/javascript');
+    res.sendFile(path.join(__dirname, 'public', 'js', 'socket.io.min.js'));
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ==========================================
