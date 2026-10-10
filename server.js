@@ -100,6 +100,274 @@ app.get('/api/rooms/:roomCode/exists', (req, res) => {
     return res.json({ exists });
 });
 
+// Reusable Room Helpers for both WebSocket and HTTP REST fallbacks
+async function handleAddSongToQueue(roomCode, request) {
+    try {
+        const { username, songId, title, artist, album, coverUrl, durationSeconds, audioUrl, playImmediately } = request || {};
+        if (!roomCode || !songId) return { success: false, error: 'Missing roomCode or songId' };
+
+        const room = roomService.getRoom(roomCode);
+        if (!room) return { success: false, error: 'Room not found' };
+
+        let song = await musicService.getSongById(songId);
+        if (song) {
+            if (title && (song.title === 'YouTube Track' || song.title === 'YouTube Video' || !song.title)) {
+                song.title = title;
+            }
+            if (artist && (song.artist === 'YouTube' || !song.artist)) {
+                song.artist = artist;
+            }
+            if (album && (!song.album || song.album === 'YouTube Music' || song.album === 'YouTube Video')) {
+                song.album = album;
+            }
+            if (coverUrl && !song.coverUrl) {
+                song.coverUrl = coverUrl;
+            }
+            if (durationSeconds && (!song.durationSeconds || song.durationSeconds <= 0)) {
+                song.durationSeconds = durationSeconds;
+            }
+            if ((!song.audioUrl || song.audioUrl.startsWith('jio_')) && audioUrl && audioUrl.startsWith('http')) {
+                song.audioUrl = audioUrl;
+            }
+        } else {
+            song = {
+                id: songId,
+                title: title || 'Unknown Title',
+                artist: artist || 'Unknown Artist',
+                album: album || '',
+                coverUrl: coverUrl || '',
+                durationSeconds: durationSeconds || 0,
+                audioUrl: audioUrl || songId,
+                addedBy: username
+            };
+            musicService.cacheSong(song);
+        }
+
+        if (song.id.startsWith('jio_') && (!song.audioUrl || song.audioUrl.startsWith('jio_') || song.audioUrl.includes('preview') || song.audioUrl.includes('jiotune'))) {
+            const cleanId = song.id.substring(4);
+            const resolved = await jioSaavnService.getSongById(cleanId);
+            if (resolved && resolved.audioUrl && !resolved.audioUrl.startsWith('jio_')) {
+                song.audioUrl = resolved.audioUrl;
+                if (resolved.durationSeconds && !song.durationSeconds) {
+                    song.durationSeconds = resolved.durationSeconds;
+                }
+                musicService.cacheSong(song);
+            }
+        }
+
+        const queuedSong = { ...song, addedBy: username };
+        room.queue.push(queuedSong);
+
+        if (room.queue.length === 1 || playImmediately) {
+            room.playbackState.currentSongIndex = room.queue.length - 1;
+            room.playbackState.currentTime = 0;
+            room.playbackState.playing = true;
+            room.playbackState.lastUpdated = Date.now();
+        }
+
+        const systemMsg = {
+            id: require('crypto').randomUUID(),
+            username: 'System',
+            avatarColor: '#1DB954',
+            message: `${username || 'Someone'} ${playImmediately ? 'started playing' : 'added to the queue'} "${song.title}"`,
+            type: 'system',
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        roomService.addChatMessage(room, systemMsg);
+
+        const roomState = roomService.getRoomState(room.roomCode);
+        const activeCurrentSong = roomService.getCurrentSong(room);
+        try {
+            io.to(room.roomCode).emit('room:state', roomState);
+            io.to(room.roomCode).emit('room:playback', {
+                ...room.playbackState,
+                playbackState: { ...room.playbackState },
+                currentSong: activeCurrentSong,
+                estimatedCurrentTime: room.playbackState.currentTime
+            });
+            io.to(room.roomCode).emit('room:chat', systemMsg);
+        } catch (_) {}
+
+        return { success: true, roomState, currentSong: activeCurrentSong, playbackState: room.playbackState };
+    } catch (err) {
+        console.error('handleAddSongToQueue error:', err);
+        return { success: false, error: err.message };
+    }
+}
+
+function handleRemoveSongFromQueue(roomCode, songId) {
+    if (!roomCode || !songId) return { success: false, error: 'Missing roomCode or songId' };
+    const room = roomService.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+
+    const removedIndex = room.queue.findIndex(s => s.id === songId);
+    if (removedIndex === -1) return { success: false, error: 'Song not found in queue' };
+
+    room.queue.splice(removedIndex, 1);
+
+    const state = room.playbackState;
+    if (room.queue.length === 0) {
+        state.currentSongIndex = 0;
+        state.currentTime = 0;
+        state.playing = false;
+    } else if (removedIndex < state.currentSongIndex) {
+        state.currentSongIndex--;
+    } else if (removedIndex === state.currentSongIndex) {
+        if (state.currentSongIndex >= room.queue.length) {
+            state.currentSongIndex = 0;
+            state.currentTime = 0;
+            state.playing = false;
+        } else {
+            state.currentTime = 0;
+        }
+    }
+    state.lastUpdated = Date.now();
+
+    const roomState = roomService.getRoomState(room.roomCode);
+    const currentSong = roomService.getCurrentSong(room);
+    try {
+        io.to(room.roomCode).emit('room:state', roomState);
+        io.to(room.roomCode).emit('room:playback', {
+            ...state,
+            playbackState: { ...state },
+            currentSong: currentSong,
+            estimatedCurrentTime: state.currentTime
+        });
+    } catch (_) {}
+
+    return { success: true, roomState, currentSong, playbackState: state };
+}
+
+function handleUpdatePlayback(roomCode, request) {
+    const { action, currentTime } = request || {};
+    if (!roomCode) return { success: false, error: 'Missing roomCode' };
+    const room = roomService.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+
+    const state = room.playbackState;
+    const now = Date.now();
+
+    switch (action) {
+        case 'play':
+            state.playing = true;
+            if (typeof currentTime === 'number') state.currentTime = currentTime;
+            break;
+        case 'pause':
+            state.playing = false;
+            if (typeof currentTime === 'number') state.currentTime = currentTime;
+            break;
+        case 'seek':
+            if (typeof currentTime === 'number') state.currentTime = currentTime;
+            break;
+        case 'next': {
+            const nextIndex = state.currentSongIndex + 1;
+            if (nextIndex < room.queue.length) {
+                state.currentSongIndex = nextIndex;
+                state.currentTime = 0;
+                state.playing = true;
+            } else {
+                state.playing = false;
+                state.currentTime = 0;
+            }
+            break;
+        }
+        case 'previous': {
+            const prevIndex = state.currentSongIndex - 1;
+            if (prevIndex >= 0) {
+                state.currentSongIndex = prevIndex;
+                state.currentTime = 0;
+                state.playing = true;
+            }
+            break;
+        }
+        case 'select': {
+            const selectIndex = parseInt(currentTime, 10);
+            if (selectIndex >= 0 && selectIndex < room.queue.length) {
+                state.currentSongIndex = selectIndex;
+                state.currentTime = 0;
+                state.playing = true;
+            }
+            break;
+        }
+        case 'timesync':
+            if (typeof currentTime === 'number') state.currentTime = currentTime;
+            break;
+    }
+
+    state.lastUpdated = now;
+
+    const currentSong = roomService.getCurrentSong(room);
+    const payload = {
+        ...state,
+        playbackState: { ...state },
+        currentSong: currentSong,
+        estimatedCurrentTime: state.currentTime
+    };
+
+    try {
+        io.to(room.roomCode).emit('room:playback', payload);
+        if (['next', 'previous', 'select'].includes(action)) {
+            io.to(room.roomCode).emit('room:state', roomService.getRoomState(room.roomCode));
+        }
+    } catch (_) {}
+
+    return { success: true, playbackState: state, currentSong, roomState: roomService.getRoomState(room.roomCode) };
+}
+
+function handleAddChatMessage(roomCode, request) {
+    const { username, message } = request || {};
+    if (!roomCode || !message || !message.trim()) return { success: false, error: 'Missing roomCode or message' };
+
+    const room = roomService.getRoom(roomCode);
+    if (!room) return { success: false, error: 'Room not found' };
+
+    const user = room.users.find(u => u.username === username);
+    const chatMsg = {
+        id: require('crypto').randomUUID(),
+        username: username || 'Anonymous',
+        avatarColor: user ? user.avatarColor : '#1DB954',
+        message: message.trim(),
+        type: 'user',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    roomService.addChatMessage(room, chatMsg);
+    try {
+        io.to(room.roomCode).emit('room:chat', chatMsg);
+    } catch (_) {}
+
+    return { success: true, chatMsg };
+}
+
+// REST Fallback routes for room interactions
+app.post('/api/rooms/:roomCode/queue/add', async (req, res) => {
+    const roomCode = (req.params.roomCode || '').trim().toUpperCase();
+    const result = await handleAddSongToQueue(roomCode, req.body);
+    if (!result.success) return res.status(400).json({ error: result.error || 'Failed to add song' });
+    return res.json(result);
+});
+
+app.post('/api/rooms/:roomCode/queue/remove', (req, res) => {
+    const roomCode = (req.params.roomCode || '').trim().toUpperCase();
+    const result = handleRemoveSongFromQueue(roomCode, req.body ? req.body.songId : null);
+    if (!result.success) return res.status(400).json({ error: result.error || 'Failed to remove song' });
+    return res.json(result);
+});
+
+app.post('/api/rooms/:roomCode/playback', (req, res) => {
+    const roomCode = (req.params.roomCode || '').trim().toUpperCase();
+    const result = handleUpdatePlayback(roomCode, req.body);
+    if (!result.success) return res.status(400).json({ error: result.error || 'Failed to update playback' });
+    return res.json(result);
+});
+
+app.post('/api/rooms/:roomCode/chat', (req, res) => {
+    const roomCode = (req.params.roomCode || '').trim().toUpperCase();
+    const result = handleAddChatMessage(roomCode, req.body);
+    if (!result.success) return res.status(400).json({ error: result.error || 'Failed to send chat' });
+    return res.json(result);
+});
+
 // Local Music Library
 app.get('/api/music/library', (req, res) => {
     return res.json(musicService.getLibrary());
@@ -294,169 +562,12 @@ io.on('connection', (socket) => {
 
     // 3. Playback Commands
     socket.on('room:playback', (command) => {
-        const { roomCode, action, currentTime } = command || {};
-        if (!roomCode) return;
-
-        const room = roomService.getRoom(roomCode);
-        if (!room) return;
-
-        const state = room.playbackState;
-        const now = Date.now();
-
-        switch (action) {
-            case 'play':
-                state.playing = true;
-                if (typeof currentTime === 'number') state.currentTime = currentTime;
-                break;
-            case 'pause':
-                state.playing = false;
-                if (typeof currentTime === 'number') state.currentTime = currentTime;
-                break;
-            case 'seek':
-                if (typeof currentTime === 'number') state.currentTime = currentTime;
-                break;
-            case 'next': {
-                const nextIndex = state.currentSongIndex + 1;
-                if (nextIndex < room.queue.length) {
-                    state.currentSongIndex = nextIndex;
-                    state.currentTime = 0;
-                    state.playing = true;
-                } else {
-                    state.playing = false;
-                    state.currentTime = 0;
-                }
-                break;
-            }
-            case 'previous': {
-                const prevIndex = state.currentSongIndex - 1;
-                if (prevIndex >= 0) {
-                    state.currentSongIndex = prevIndex;
-                    state.currentTime = 0;
-                    state.playing = true;
-                }
-                break;
-            }
-            case 'select': {
-                const selectIndex = parseInt(currentTime, 10);
-                if (selectIndex >= 0 && selectIndex < room.queue.length) {
-                    state.currentSongIndex = selectIndex;
-                    state.currentTime = 0;
-                    state.playing = true;
-                }
-                break;
-            }
-            case 'timesync':
-                if (typeof currentTime === 'number') state.currentTime = currentTime;
-                break;
-        }
-
-        state.lastUpdated = now;
-
-        const currentSong = roomService.getCurrentSong(room);
-        const payload = {
-            ...state,
-            playbackState: { ...state },
-            currentSong: currentSong,
-            estimatedCurrentTime: state.currentTime
-        };
-
-        io.to(room.roomCode).emit('room:playback', payload);
-
-        if (['next', 'previous', 'select'].includes(action)) {
-            io.to(room.roomCode).emit('room:state', roomService.getRoomState(room.roomCode));
-        }
+        handleUpdatePlayback(command ? command.roomCode : null, command);
     });
 
     // 4. Add to Queue
     socket.on('room:queue:add', async (request) => {
-        try {
-            const { roomCode, username, songId, title, artist, album, coverUrl, durationSeconds, audioUrl, playImmediately } = request || {};
-            if (!roomCode || !songId) return;
-
-            const room = roomService.getRoom(roomCode);
-            if (!room) return;
-
-            let song = await musicService.getSongById(songId);
-            if (song) {
-                if (title && (song.title === 'YouTube Track' || song.title === 'YouTube Video' || !song.title)) {
-                    song.title = title;
-                }
-                if (artist && (song.artist === 'YouTube' || !song.artist)) {
-                    song.artist = artist;
-                }
-                if (album && (!song.album || song.album === 'YouTube Music' || song.album === 'YouTube Video')) {
-                    song.album = album;
-                }
-                if (coverUrl && !song.coverUrl) {
-                    song.coverUrl = coverUrl;
-                }
-                if (durationSeconds && (!song.durationSeconds || song.durationSeconds <= 0)) {
-                    song.durationSeconds = durationSeconds;
-                }
-                if ((!song.audioUrl || song.audioUrl.startsWith('jio_')) && audioUrl && audioUrl.startsWith('http')) {
-                    song.audioUrl = audioUrl;
-                }
-            } else {
-                song = {
-                    id: songId,
-                    title: title || 'Unknown Title',
-                    artist: artist || 'Unknown Artist',
-                    album: album || '',
-                    coverUrl: coverUrl || '',
-                    durationSeconds: durationSeconds || 0,
-                    audioUrl: audioUrl || songId,
-                    addedBy: username
-                };
-                musicService.cacheSong(song);
-            }
-
-            // If JioSaavn, make sure full-length audio is resolved
-            if (song.id.startsWith('jio_') && (!song.audioUrl || song.audioUrl.startsWith('jio_') || song.audioUrl.includes('preview') || song.audioUrl.includes('jiotune'))) {
-                const cleanId = song.id.substring(4);
-                const resolved = await jioSaavnService.getSongById(cleanId);
-                if (resolved && resolved.audioUrl && !resolved.audioUrl.startsWith('jio_')) {
-                    song.audioUrl = resolved.audioUrl;
-                    if (resolved.durationSeconds && !song.durationSeconds) {
-                        song.durationSeconds = resolved.durationSeconds;
-                    }
-                    musicService.cacheSong(song);
-                }
-            }
-
-            const queuedSong = { ...song, addedBy: username };
-            room.queue.push(queuedSong);
-
-            // Auto-play if first song or playImmediately
-            if (room.queue.length === 1 || playImmediately) {
-                room.playbackState.currentSongIndex = room.queue.length - 1;
-                room.playbackState.currentTime = 0;
-                room.playbackState.playing = true;
-                room.playbackState.lastUpdated = Date.now();
-            }
-
-            const systemMsg = {
-                id: require('crypto').randomUUID(),
-                username: 'System',
-                avatarColor: '#1DB954',
-                message: `${username || 'Someone'} ${playImmediately ? 'started playing' : 'added to the queue'} "${song.title}"`,
-                type: 'system',
-                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            };
-            roomService.addChatMessage(room, systemMsg);
-
-            const roomState = roomService.getRoomState(room.roomCode);
-            const activeCurrentSong = roomService.getCurrentSong(room);
-            io.to(room.roomCode).emit('room:state', roomState);
-            io.to(room.roomCode).emit('room:playback', {
-                ...room.playbackState,
-                playbackState: { ...room.playbackState },
-                currentSong: activeCurrentSong,
-                estimatedCurrentTime: room.playbackState.currentTime
-            });
-            io.to(room.roomCode).emit('room:chat', systemMsg);
-        } catch (err) {
-            console.error('Error handling room:queue:add:', err);
-        }
+        await handleAddSongToQueue(request ? request.roomCode : null, request);
     });
 
     // 4b. Add Batch to Queue (Playlist Import / Custom Playlist)
@@ -514,44 +625,7 @@ io.on('connection', (socket) => {
 
     // 5. Remove from Queue
     socket.on('room:queue:remove', (request) => {
-        const { roomCode, songId } = request || {};
-        if (!roomCode || !songId) return;
-
-        const room = roomService.getRoom(roomCode);
-        if (!room) return;
-
-        const removedIndex = room.queue.findIndex(s => s.id === songId);
-        if (removedIndex === -1) return;
-
-        room.queue.splice(removedIndex, 1);
-
-        const state = room.playbackState;
-        if (room.queue.length === 0) {
-            state.currentSongIndex = 0;
-            state.currentTime = 0;
-            state.playing = false;
-        } else if (removedIndex < state.currentSongIndex) {
-            state.currentSongIndex--;
-        } else if (removedIndex === state.currentSongIndex) {
-            if (state.currentSongIndex >= room.queue.length) {
-                state.currentSongIndex = 0;
-                state.currentTime = 0;
-                state.playing = false;
-            } else {
-                state.currentTime = 0;
-            }
-        }
-        state.lastUpdated = Date.now();
-
-        const roomState = roomService.getRoomState(room.roomCode);
-        const currentSong = roomService.getCurrentSong(room);
-        io.to(room.roomCode).emit('room:state', roomState);
-        io.to(room.roomCode).emit('room:playback', {
-            ...state,
-            playbackState: { ...state },
-            currentSong: currentSong,
-            estimatedCurrentTime: state.currentTime
-        });
+        handleRemoveSongFromQueue(request ? request.roomCode : null, request ? request.songId : null);
     });
 
     // 6. Reorder Queue
@@ -588,24 +662,7 @@ io.on('connection', (socket) => {
 
     // 7. Chat Message
     socket.on('room:chat', (data) => {
-        const { roomCode, username, message } = data || {};
-        if (!roomCode || !message || !message.trim()) return;
-
-        const room = roomService.getRoom(roomCode);
-        if (!room) return;
-
-        const user = room.users.find(u => u.username === username);
-        const chatMsg = {
-            id: require('crypto').randomUUID(),
-            username: username || 'Anonymous',
-            avatarColor: user ? user.avatarColor : '#1DB954',
-            message: message.trim(),
-            type: 'user',
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-
-        roomService.addChatMessage(room, chatMsg);
-        io.to(room.roomCode).emit('room:chat', chatMsg);
+        handleAddChatMessage(data ? data.roomCode : null, data);
     });
 
     // 8. Disconnect Handler

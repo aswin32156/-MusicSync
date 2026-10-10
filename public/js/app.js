@@ -1002,19 +1002,33 @@ function reorderQueue(fromIndex, toIndex) {
 }
 
 function removeFromQueue(songId) {
-    if (!songId) {
-        showToast('Unable to remove this song right now. Try refreshing room state.', 'error');
+    if (!songId || !currentRoom) {
+        showToast('Unable to remove this song right now.', 'error');
         return;
     }
 
-    waitForConnection(() => {
+    if (socket && socket.connected) {
         socket.emit('room:queue:remove', {
             roomCode: currentRoom.roomCode,
             songId: songId,
             username: currentUser
         });
+        showToast('Song removed from queue', 'success');
+        return;
+    }
+
+    // Direct HTTP REST fallback
+    fetch('/api/rooms/' + encodeURIComponent(currentRoom.roomCode) + '/queue/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ songId, username: currentUser })
+    }).then(res => res.json()).then(data => {
+        if (data.roomState) updateRoomUI(data.roomState);
+        showToast('Song removed from queue', 'success');
+        scheduleRoomStateRefresh(200);
+    }).catch(err => {
+        console.error('Remove queue HTTP error:', err);
     });
-    showToast('Song removed from queue', 'success');
 }
 
 // ===== YouTube IFrame Video Player =====
@@ -2127,38 +2141,58 @@ function addToQueue(songId) {
 
     const playImmediately = (!currentRoom.queue || currentRoom.queue.length === 0);
 
-    if (!socket || !socket.connected) {
-        pendingAddSongs.add(songId);
-        showToast('Connecting... song will be added shortly.', 'info');
-        waitForConnection(() => {
-            pendingAddSongs.delete(songId);
-            sendAddToQueue(songId, playImmediately);
-        });
-        return;
-    }
     sendAddToQueue(songId, playImmediately);
 }
 window.addToQueue = addToQueue;
 
-function sendAddToQueue(songId, playImmediately = false) {
+async function sendAddToQueue(songId, playImmediately = false) {
     const selectedSong = songMetadataStore.get(songId)
         || (Array.isArray(_allSearchResults) ? _allSearchResults.find(s => s && s.id === songId) : null);
+
+    const payload = {
+        roomCode: currentRoom.roomCode,
+        songId: songId,
+        username: currentUser,
+        title: selectedSong ? selectedSong.title : undefined,
+        artist: selectedSong ? selectedSong.artist : undefined,
+        album: selectedSong ? selectedSong.album : undefined,
+        coverUrl: selectedSong ? selectedSong.coverUrl : undefined,
+        durationSeconds: selectedSong ? (selectedSong.durationSeconds || 0) : 0,
+        audioUrl: selectedSong ? selectedSong.audioUrl : undefined,
+        playImmediately: !!playImmediately
+    };
+
+    if (socket && socket.connected) {
+        try {
+            socket.emit('room:queue:add', payload);
+            showToast(playImmediately ? 'Playing song now!' : 'Song added to queue!', 'success');
+            return;
+        } catch (err) {
+            console.warn('[addToQueue] Socket emit failed, using HTTP fallback:', err);
+        }
+    }
+
+    // Direct HTTP REST fallback when WebSocket is not connected or in serverless mode
     try {
-        socket.emit('room:queue:add', {
-            roomCode: currentRoom.roomCode,
-            songId: songId,
-            username: currentUser,
-            title: selectedSong ? selectedSong.title : undefined,
-            artist: selectedSong ? selectedSong.artist : undefined,
-            album: selectedSong ? selectedSong.album : undefined,
-            coverUrl: selectedSong ? selectedSong.coverUrl : undefined,
-            durationSeconds: selectedSong ? (selectedSong.durationSeconds || 0) : 0,
-            audioUrl: selectedSong ? selectedSong.audioUrl : undefined,
-            playImmediately: !!playImmediately
+        const res = await fetch('/api/rooms/' + encodeURIComponent(currentRoom.roomCode) + '/queue/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
         });
+
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.error || 'Failed to add song');
+        }
+
+        const data = await res.json();
+        if (data.roomState) {
+            updateRoomUI(data.roomState);
+        }
         showToast(playImmediately ? 'Playing song now!' : 'Song added to queue!', 'success');
+        scheduleRoomStateRefresh(200);
     } catch (err) {
-        console.error('AddToQueue Socket error:', err);
+        console.error('AddToQueue HTTP error:', err);
         showToast('Failed to add song. Check connection.', 'error');
     }
 }
@@ -2374,17 +2408,21 @@ function seekTo(event) {
 }
 
 function sendPlaybackCommand(action, time) {
-    const doSend = () => {
-        socket.emit('room:playback', {
-            roomCode: currentRoom.roomCode,
-            action: action,
-            currentTime: time
-        });
+    const payload = {
+        roomCode: currentRoom.roomCode,
+        action: action,
+        currentTime: time
     };
     if (socket && socket.connected) {
-        doSend();
+        socket.emit('room:playback', payload);
     } else {
-        waitForConnection(doSend);
+        fetch('/api/rooms/' + encodeURIComponent(currentRoom.roomCode) + '/playback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then(res => res.json()).then(data => {
+            if (data.roomState) updateRoomUI(data.roomState);
+        }).catch(err => console.warn('Playback HTTP fallback error:', err));
     }
 }
 
@@ -2485,19 +2523,19 @@ function connectWebSocket(roomCode, username) {
 
     try {
         if (typeof io === 'undefined') {
-            console.error('[WebSocket] Socket.IO client library (io) is not loaded.');
+            console.warn('[WebSocket] Socket.IO client library (io) not found. Running in HTTP Sync Mode.');
             isConnecting = false;
-            statusEl.className = 'connection-status show disconnected';
-            statusEl.innerHTML = '<i class="fas fa-wifi"></i><span>Connection error</span>';
-            showToast('Real-time sync library (Socket.io) failed to load. Please check network or ad-blocker.', 'error');
+            statusEl.className = 'connection-status show connected';
+            statusEl.innerHTML = '<i class="fas fa-check-circle"></i><span>HTTP Sync Mode</span>';
+            setTimeout(() => statusEl.classList.remove('show'), 2000);
             return;
         }
 
         if (!socket) {
             const socketOpts = {
                 reconnection: true,
-                reconnectionAttempts: 10,
-                reconnectionDelay: 1000
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1500
             };
             const customBackend = window.BACKEND_URL || localStorage.getItem('musicsync_backend_url') || '';
             socket = customBackend ? io(customBackend, socketOpts) : io(socketOpts);
@@ -2541,28 +2579,26 @@ function connectWebSocket(roomCode, username) {
             socket.on('disconnect', (reason) => {
                 console.warn('[WebSocket] Socket disconnected:', reason);
                 isConnecting = false;
-                statusEl.className = 'connection-status show disconnected';
-                statusEl.innerHTML = '<i class="fas fa-wifi"></i><span>Disconnected</span>';
+                statusEl.className = 'connection-status show connected';
+                statusEl.innerHTML = '<i class="fas fa-check-circle"></i><span>HTTP Sync Mode</span>';
             });
 
             socket.on('connect_error', (error) => {
-                console.error('[WebSocket] Connection error:', error);
+                console.warn('[WebSocket] Realtime socket inactive (using HTTP sync mode):', error.message || error);
                 isConnecting = false;
-                statusEl.className = 'connection-status show disconnected';
-                statusEl.innerHTML = '<i class="fas fa-wifi"></i><span>Connection failed</span>';
-                if (window.location.hostname.endsWith('vercel.app')) {
-                    console.warn('[WebSocket] Notice: Vercel serverless functions do not support WebSockets. For live syncing, deploy backend to Render or a VPS.');
-                }
+                statusEl.className = 'connection-status show connected';
+                statusEl.innerHTML = '<i class="fas fa-check-circle"></i><span>HTTP Sync Mode</span>';
+                setTimeout(() => statusEl.classList.remove('show'), 2000);
             });
         } else if (!socket.connected) {
             socket.connect();
         }
     } catch (err) {
-        console.error('[WebSocket] Exception during connection:', err);
+        console.warn('[WebSocket] Exception during connection, falling back to HTTP sync:', err);
         isConnecting = false;
-        statusEl.className = 'connection-status show disconnected';
-        statusEl.innerHTML = '<i class="fas fa-wifi"></i><span>Connection error</span>';
-        showToast('WebSocket error: ' + err.message, 'error');
+        statusEl.className = 'connection-status show connected';
+        statusEl.innerHTML = '<i class="fas fa-check-circle"></i><span>HTTP Sync Mode</span>';
+        setTimeout(() => statusEl.classList.remove('show'), 2000);
     }
 }
 
@@ -2841,20 +2877,29 @@ function handlePlaybackUpdate(data) {
 function sendChat() {
     const input = document.getElementById('chat-input');
     const message = input.value.trim();
-    if (!message) return;
+    if (!message || !currentRoom) return;
 
-    if (!socket || !socket.connected) {
-        showToast('Not connected to server', 'error');
+    if (socket && socket.connected) {
+        socket.emit('room:chat', {
+            roomCode: currentRoom.roomCode,
+            username: currentUser,
+            message: message
+        });
+        input.value = '';
         return;
     }
 
-    socket.emit('room:chat', {
-        roomCode: currentRoom.roomCode,
-        username: currentUser,
-        message: message
+    // Direct HTTP REST fallback
+    fetch('/api/rooms/' + encodeURIComponent(currentRoom.roomCode) + '/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: currentUser, message: message })
+    }).then(res => res.json()).then(data => {
+        if (data.chatMsg) appendChatMessage(data.chatMsg);
+        input.value = '';
+    }).catch(err => {
+        console.warn('Chat HTTP fallback error:', err);
     });
-
-    input.value = '';
 }
 
 function handleChatKeypress(e) {
